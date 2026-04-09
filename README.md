@@ -46,6 +46,28 @@ On the first run (no cache), lazy-mcp proxies transparently and builds the cache
 
 ## Installation
 
+Download a prebuilt binary:
+
+```bash
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/tkukushkin/lazy-mcp/releases/latest/download/lazy-mcp-darwin-arm64 -o /usr/local/bin/lazy-mcp
+chmod +x /usr/local/bin/lazy-mcp
+
+# macOS (Intel)
+curl -fsSL https://github.com/tkukushkin/lazy-mcp/releases/latest/download/lazy-mcp-darwin-amd64 -o /usr/local/bin/lazy-mcp
+chmod +x /usr/local/bin/lazy-mcp
+
+# Linux (x86_64)
+curl -fsSL https://github.com/tkukushkin/lazy-mcp/releases/latest/download/lazy-mcp-linux-amd64 -o /usr/local/bin/lazy-mcp
+chmod +x /usr/local/bin/lazy-mcp
+
+# Linux (arm64)
+curl -fsSL https://github.com/tkukushkin/lazy-mcp/releases/latest/download/lazy-mcp-linux-arm64 -o /usr/local/bin/lazy-mcp
+chmod +x /usr/local/bin/lazy-mcp
+```
+
+### Install with Go
+
 ```bash
 go install github.com/tkukushkin/lazy-mcp@latest
 ```
@@ -56,7 +78,7 @@ Or run without installing:
 go run github.com/tkukushkin/lazy-mcp@latest -- uvx some-mcp-server
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/tkukushkin/lazy-mcp.git
