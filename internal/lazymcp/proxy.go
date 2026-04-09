@@ -1,0 +1,275 @@
+package lazymcp
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"sync"
+)
+
+const maxMessageSize = 1 << 20 // 1MB
+
+type Proxy struct {
+	command          []string
+	cache            *Cache
+	cachedData       map[string]json.RawMessage
+	initializeParams *json.RawMessage
+	cmd              *exec.Cmd
+	serverIn         io.WriteCloser
+	serverOut        *bufio.Scanner
+}
+
+func NewProxy(command []string, cache *Cache) *Proxy {
+	return &Proxy{
+		command:    command,
+		cache:      cache,
+		cachedData: cache.Load(),
+	}
+}
+
+func (p *Proxy) Run() error {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, maxMessageSize), maxMessageSize)
+
+	if p.cachedData == nil {
+		return p.runNoCache(scanner)
+	}
+	return p.runCached(scanner)
+}
+
+func (p *Proxy) runCached(scanner *bufio.Scanner) error {
+	for scanner.Scan() {
+		msg, err := ParseMessage(scanner.Bytes())
+		if err != nil {
+			continue
+		}
+
+		switch {
+		case msg.Method == "initialize":
+			p.initializeParams = msg.Params
+			if result, ok := p.cachedData["initialize"]; ok {
+				writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
+			} else {
+				return p.goLive(msg, scanner)
+			}
+
+		case msg.Method == "notifications/initialized":
+			// swallow
+
+		case IsDiscoveryMethod(msg.Method):
+			if result, ok := p.cachedData[msg.Method]; ok {
+				writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
+			} else {
+				return p.goLive(msg, scanner)
+			}
+
+		default:
+			return p.goLive(msg, scanner)
+		}
+	}
+	return scanner.Err()
+}
+
+func (p *Proxy) runNoCache(scanner *bufio.Scanner) error {
+	newCache := make(map[string]json.RawMessage)
+
+	for scanner.Scan() {
+		msg, err := ParseMessage(scanner.Bytes())
+		if err != nil {
+			continue
+		}
+
+		if p.cmd == nil {
+			if err := p.startServer(); err != nil {
+				if msg.ID != nil {
+					writeStdout(MakeErrorResponse(
+						json.RawMessage(*msg.ID), -32603, err.Error()))
+				}
+				return nil
+			}
+		}
+
+		switch {
+		case msg.Method == "initialize":
+			p.initializeParams = msg.Params
+			resp, err := p.forwardRequest(msg)
+			if err != nil {
+				return err
+			}
+			if resp.Result != nil {
+				newCache["initialize"] = *resp.Result
+			}
+
+		case msg.Method == "notifications/initialized":
+			p.writeServer(SerializeMessage(msg))
+
+		case IsDiscoveryMethod(msg.Method):
+			resp, err := p.forwardRequest(msg)
+			if err != nil {
+				return err
+			}
+			if resp.Result != nil {
+				newCache[msg.Method] = *resp.Result
+			}
+
+		default:
+			p.cache.Save(newCache)
+			p.writeServer(SerializeMessage(msg))
+			return p.bidirectionalProxy(scanner)
+		}
+	}
+
+	if len(newCache) > 0 {
+		p.cache.Save(newCache)
+	}
+	p.shutdownServer()
+	return scanner.Err()
+}
+
+func (p *Proxy) goLive(triggeringMsg *Message, scanner *bufio.Scanner) error {
+	if err := p.startServer(); err != nil {
+		if triggeringMsg.ID != nil {
+			writeStdout(MakeErrorResponse(
+				json.RawMessage(*triggeringMsg.ID), -32603, err.Error()))
+		}
+		return nil
+	}
+
+	newCache := make(map[string]json.RawMessage)
+
+	if p.initializeParams != nil {
+		initReq := MakeRequest("lazy-mcp-init", "initialize", p.initializeParams)
+		p.writeServer(SerializeMessage(initReq))
+		initResp, err := p.readResponse(`"lazy-mcp-init"`)
+		if err != nil {
+			return err
+		}
+		if initResp.Result != nil {
+			newCache["initialize"] = *initResp.Result
+		}
+
+		notif := &Message{JSONRPC: "2.0", Method: "notifications/initialized"}
+		p.writeServer(SerializeMessage(notif))
+
+		var initResult struct {
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		}
+		if initResp.Result != nil {
+			json.Unmarshal(*initResp.Result, &initResult)
+		}
+
+		for method, capKey := range ListMethodToCapability() {
+			if _, ok := initResult.Capabilities[capKey]; ok {
+				reqID := fmt.Sprintf("lazy-mcp-%s", method)
+				req := MakeRequest(reqID, method, nil)
+				p.writeServer(SerializeMessage(req))
+				resp, err := p.readResponse(fmt.Sprintf("%q", reqID))
+				if err != nil {
+					return err
+				}
+				if resp.Result != nil {
+					newCache[method] = *resp.Result
+				}
+			}
+		}
+	}
+
+	p.cache.Save(newCache)
+
+	p.writeServer(SerializeMessage(triggeringMsg))
+
+	return p.bidirectionalProxy(scanner)
+}
+
+func (p *Proxy) startServer() error {
+	p.cmd = exec.Command(p.command[0], p.command[1:]...)
+	var err error
+	p.serverIn, err = p.cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := p.cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	p.cmd.Stderr = os.Stderr
+	p.serverOut = bufio.NewScanner(stdout)
+	p.serverOut.Buffer(make([]byte, maxMessageSize), maxMessageSize)
+
+	if err := p.cmd.Start(); err != nil {
+		p.cmd = nil
+		return fmt.Errorf("command not found: %s", p.command[0])
+	}
+	return nil
+}
+
+func (p *Proxy) shutdownServer() {
+	if p.cmd != nil && p.cmd.Process != nil {
+		p.serverIn.Close()
+		p.cmd.Wait()
+	}
+}
+
+func (p *Proxy) forwardRequest(msg *Message) (*Message, error) {
+	p.writeServer(SerializeMessage(msg))
+	resp, err := p.readResponse(string(*msg.ID))
+	if err != nil {
+		return nil, err
+	}
+	writeStdout(SerializeMessage(resp))
+	return resp, nil
+}
+
+func (p *Proxy) readResponse(requestID string) (*Message, error) {
+	for p.serverOut.Scan() {
+		msg, err := ParseMessage(p.serverOut.Bytes())
+		if err != nil {
+			continue
+		}
+		if msg.ID != nil && string(*msg.ID) == requestID {
+			return msg, nil
+		}
+		writeStdout(p.serverOut.Bytes())
+		writeStdout([]byte("\n"))
+	}
+	if err := p.serverOut.Err(); err != nil {
+		return nil, fmt.Errorf("server closed: %w", err)
+	}
+	return nil, fmt.Errorf("server closed unexpectedly")
+}
+
+func (p *Proxy) writeServer(data []byte) {
+	p.serverIn.Write(data)
+}
+
+func writeStdout(data []byte) {
+	os.Stdout.Write(data)
+}
+
+func (p *Proxy) bidirectionalProxy(scanner *bufio.Scanner) error {
+	var wg sync.WaitGroup
+
+	// stdin → server
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for scanner.Scan() {
+			p.serverIn.Write(scanner.Bytes())
+			p.serverIn.Write([]byte("\n"))
+		}
+		p.serverIn.Close()
+	}()
+
+	// server → stdout
+	for p.serverOut.Scan() {
+		os.Stdout.Write(p.serverOut.Bytes())
+		os.Stdout.Write([]byte("\n"))
+	}
+
+	wg.Wait()
+	p.cmd.Wait()
+	return nil
+}
