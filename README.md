@@ -104,6 +104,27 @@ Instead of:
 }
 ```
 
+### Deferring credential access with secret-box
+
+If your MCP server needs credentials (API tokens, passwords, etc.), you can use [secret-box](https://github.com/tkukushkin/secret-box) to inject them as environment variables. Combined with lazy-mcp, Touch ID confirmation will only be triggered when a tool is actually called — not at agent startup:
+
+```jsonc
+{
+  "mcpServers": {
+    "some-server": {
+      "command": "lazy-mcp",
+      "args": [
+        "--", "secret-box", "exec",
+        "-e", "API_TOKEN=some-server-token",
+        "--", "uvx", "some-mcp-server"
+      ]
+    }
+  }
+}
+```
+
+Without lazy-mcp, the server would start immediately on agent launch, prompting for Touch ID even if none of its tools are ever used during the session.
+
 ## Cache
 
 Discovery responses are cached in the OS cache directory:
