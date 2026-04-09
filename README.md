@@ -55,6 +55,12 @@ Download a prebuilt binary (auto-detects OS and architecture):
 curl -fsSL https://raw.githubusercontent.com/tkukushkin/lazy-mcp/master/install.sh | sh
 ```
 
+On Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/tkukushkin/lazy-mcp/master/install.ps1 | iex
+```
+
 ### Install with Go
 
 ```bash
@@ -129,10 +135,11 @@ Without lazy-mcp, the server would start immediately on agent launch, prompting 
 
 Discovery responses are cached in the OS cache directory:
 
-| OS    | Path                                      |
-|-------|-------------------------------------------|
-| macOS | `~/Library/Caches/lazy-mcp/`              |
-| Linux | `~/.cache/lazy-mcp/`                      |
+| OS      | Path                                      |
+|---------|-------------------------------------------|
+| macOS   | `~/Library/Caches/lazy-mcp/`              |
+| Linux   | `~/.cache/lazy-mcp/`                      |
+| Windows | `%LOCALAPPDATA%\lazy-mcp\`                |
 
 Each MCP server command gets its own cache file, keyed by a SHA-256 hash of the full command and arguments.
 
