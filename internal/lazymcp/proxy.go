@@ -106,6 +106,7 @@ func (p *Proxy) runNoCache(scanner *bufio.Scanner) error {
 			if resp.Result != nil {
 				newCache["initialize"] = *resp.Result
 			}
+			p.saveCache(newCache)
 
 		case msg.Method == "notifications/initialized":
 			p.writeServer(SerializeMessage(msg))
@@ -118,17 +119,15 @@ func (p *Proxy) runNoCache(scanner *bufio.Scanner) error {
 			if resp.Result != nil {
 				newCache[msg.Method] = *resp.Result
 			}
+			p.saveCache(newCache)
 
 		default:
-			p.cache.Save(newCache)
+			p.saveCache(newCache)
 			p.writeServer(SerializeMessage(msg))
 			return p.bidirectionalProxy(scanner)
 		}
 	}
 
-	if len(newCache) > 0 {
-		p.cache.Save(newCache)
-	}
 	p.shutdownServer()
 	return scanner.Err()
 }
@@ -181,7 +180,7 @@ func (p *Proxy) goLive(triggeringMsg *Message, scanner *bufio.Scanner) error {
 		}
 	}
 
-	p.cache.Save(newCache)
+	p.saveCache(newCache)
 
 	p.writeServer(SerializeMessage(triggeringMsg))
 
@@ -243,6 +242,10 @@ func (p *Proxy) readResponse(requestID string) (*Message, error) {
 		return nil, fmt.Errorf("server closed: %w", err)
 	}
 	return nil, fmt.Errorf("server closed unexpectedly")
+}
+
+func (p *Proxy) saveCache(data map[string]json.RawMessage) {
+	p.cache.Save(data)
 }
 
 func (p *Proxy) writeServer(data []byte) {
