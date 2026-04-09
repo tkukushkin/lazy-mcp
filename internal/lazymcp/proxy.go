@@ -20,18 +20,22 @@ type Proxy struct {
 	cmd              *exec.Cmd
 	serverIn         io.WriteCloser
 	serverOut        *bufio.Scanner
+	stdin            io.Reader
+	stdout           io.Writer
 }
 
-func NewProxy(command []string, cache *Cache) *Proxy {
+func NewProxy(command []string, cache *Cache, stdin io.Reader, stdout io.Writer) *Proxy {
 	return &Proxy{
 		command:    command,
 		cache:      cache,
 		cachedData: cache.Load(),
+		stdin:      stdin,
+		stdout:     stdout,
 	}
 }
 
 func (p *Proxy) Run() error {
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := bufio.NewScanner(p.stdin)
 	scanner.Buffer(make([]byte, maxMessageSize), maxMessageSize)
 
 	if p.cachedData == nil {
@@ -51,7 +55,7 @@ func (p *Proxy) runCached(scanner *bufio.Scanner) error {
 		case msg.Method == "initialize":
 			p.initializeParams = msg.Params
 			if result, ok := p.cachedData["initialize"]; ok {
-				writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
+				p.writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
 			} else {
 				return p.goLive(msg, scanner)
 			}
@@ -61,7 +65,7 @@ func (p *Proxy) runCached(scanner *bufio.Scanner) error {
 
 		case IsDiscoveryMethod(msg.Method):
 			if result, ok := p.cachedData[msg.Method]; ok {
-				writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
+				p.writeStdout(MakeResponse(json.RawMessage(*msg.ID), result))
 			} else {
 				return p.goLive(msg, scanner)
 			}
@@ -85,7 +89,7 @@ func (p *Proxy) runNoCache(scanner *bufio.Scanner) error {
 		if p.cmd == nil {
 			if err := p.startServer(); err != nil {
 				if msg.ID != nil {
-					writeStdout(MakeErrorResponse(
+					p.writeStdout(MakeErrorResponse(
 						json.RawMessage(*msg.ID), -32603, err.Error()))
 				}
 				return nil
@@ -132,7 +136,7 @@ func (p *Proxy) runNoCache(scanner *bufio.Scanner) error {
 func (p *Proxy) goLive(triggeringMsg *Message, scanner *bufio.Scanner) error {
 	if err := p.startServer(); err != nil {
 		if triggeringMsg.ID != nil {
-			writeStdout(MakeErrorResponse(
+			p.writeStdout(MakeErrorResponse(
 				json.RawMessage(*triggeringMsg.ID), -32603, err.Error()))
 		}
 		return nil
@@ -219,7 +223,7 @@ func (p *Proxy) forwardRequest(msg *Message) (*Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	writeStdout(SerializeMessage(resp))
+	p.writeStdout(SerializeMessage(resp))
 	return resp, nil
 }
 
@@ -232,8 +236,8 @@ func (p *Proxy) readResponse(requestID string) (*Message, error) {
 		if msg.ID != nil && string(*msg.ID) == requestID {
 			return msg, nil
 		}
-		writeStdout(p.serverOut.Bytes())
-		writeStdout([]byte("\n"))
+		p.writeStdout(p.serverOut.Bytes())
+		p.writeStdout([]byte("\n"))
 	}
 	if err := p.serverOut.Err(); err != nil {
 		return nil, fmt.Errorf("server closed: %w", err)
@@ -245,8 +249,8 @@ func (p *Proxy) writeServer(data []byte) {
 	p.serverIn.Write(data)
 }
 
-func writeStdout(data []byte) {
-	os.Stdout.Write(data)
+func (p *Proxy) writeStdout(data []byte) {
+	p.stdout.Write(data)
 }
 
 func (p *Proxy) bidirectionalProxy(scanner *bufio.Scanner) error {
@@ -265,8 +269,8 @@ func (p *Proxy) bidirectionalProxy(scanner *bufio.Scanner) error {
 
 	// server → stdout
 	for p.serverOut.Scan() {
-		os.Stdout.Write(p.serverOut.Bytes())
-		os.Stdout.Write([]byte("\n"))
+		p.stdout.Write(p.serverOut.Bytes())
+		p.stdout.Write([]byte("\n"))
 	}
 
 	wg.Wait()

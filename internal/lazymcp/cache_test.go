@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,21 @@ func TestCacheDir(t *testing.T) {
 			t.Fatal("default cache dir must not be empty")
 		}
 	})
+}
+
+func TestCachePath(t *testing.T) {
+	t.Setenv("LAZY_MCP_CACHE_DIR", "/tmp/test-cache")
+	c := NewCache([]string{"my", "command"})
+	p := c.Path()
+	if p == "" {
+		t.Fatal("path must not be empty")
+	}
+	if !strings.HasPrefix(p, "/tmp/test-cache/") {
+		t.Fatalf("path %q must start with /tmp/test-cache/", p)
+	}
+	if !strings.HasSuffix(p, ".json") {
+		t.Fatalf("path %q must end with .json", p)
+	}
 }
 
 func TestCache(t *testing.T) {

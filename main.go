@@ -35,7 +35,7 @@ func main() {
 	command := args[sepIdx+1:]
 
 	cache := lazymcp.NewCache(command)
-	proxy := lazymcp.NewProxy(command, cache)
+	proxy := lazymcp.NewProxy(command, cache, os.Stdin, os.Stdout)
 	if err := proxy.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "lazy-mcp: %v\n", err)
 		os.Exit(1)
