@@ -913,6 +913,61 @@ func TestInProcess_GoLiveWithNoisyServer(t *testing.T) {
 	}
 }
 
+func TestInProcess_EagerCacheSave(t *testing.T) {
+	serverBin := buildMockServer(t)
+	cacheDir := t.TempDir()
+	t.Setenv("LAZY_MCP_CACHE_DIR", cacheDir)
+
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+
+	cache := NewCache([]string{serverBin})
+	proxy := NewProxy([]string{serverBin}, cache, stdinR, stdoutW)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- proxy.Run()
+		stdoutW.Close()
+	}()
+
+	stdoutScanner := bufio.NewScanner(stdoutR)
+
+	// Send initialize and read its response.
+	fmt.Fprintln(stdinW, request(1, "initialize", initParams))
+	if !stdoutScanner.Scan() {
+		t.Fatal("expected initialize response")
+	}
+
+	// Writing to the pipe synchronizes with the proxy's scanner.Scan(),
+	// which happens after saveCache. So by the time this write returns,
+	// initialize's cache save is guaranteed complete.
+	fmt.Fprintln(stdinW, notification("notifications/initialized"))
+
+	// No concurrent writes to the cache file at this point —
+	// the proxy is processing notifications/initialized which doesn't save.
+	cached := cache.Load()
+	if cached == nil {
+		t.Fatal("cache should have been saved eagerly after initialize")
+	}
+	if _, ok := cached["initialize"]; !ok {
+		t.Fatal("cache should contain initialize")
+	}
+
+	// Send tools/list and let the proxy finish.
+	fmt.Fprintln(stdinW, request(2, "tools/list"))
+	if !stdoutScanner.Scan() {
+		t.Fatal("expected tools/list response")
+	}
+	stdinW.Close()
+	<-done
+
+	// After proxy exits, tools/list save is guaranteed complete.
+	cached = cache.Load()
+	if _, ok := cached["tools/list"]; !ok {
+		t.Fatal("cache should contain tools/list after eager save")
+	}
+}
+
 func TestInProcess_InvalidMessagesSkippedInCachedMode(t *testing.T) {
 	serverBin := buildMockServer(t)
 	cacheDir := t.TempDir()
