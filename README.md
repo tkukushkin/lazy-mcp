@@ -1,5 +1,8 @@
 # lazy-mcp
 
+[![Test](https://github.com/tkukushkin/lazy-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/tkukushkin/lazy-mcp/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/tkukushkin/lazy-mcp/graph/badge.svg)](https://codecov.io/gh/tkukushkin/lazy-mcp)
+
 A lazy proxy for [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) servers over stdio. It defers starting the real server until a tool is actually called, serving discovery responses from a local cache in the meantime.
 
 ## Why
