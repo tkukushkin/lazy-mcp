@@ -3,12 +3,20 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/tkukushkin/lazy-mcp/internal/lazymcp"
 )
 
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
+
+	if len(args) > 0 && args[0] == "version" {
+		fmt.Println(getVersion())
+		return
+	}
 
 	if len(args) > 0 && args[0] == "clear-cache" {
 		dir := lazymcp.CacheDir()
@@ -30,6 +38,7 @@ func main() {
 	if sepIdx == -1 || sepIdx+1 >= len(args) {
 		fmt.Fprintln(os.Stderr, "Usage: lazy-mcp -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "       lazy-mcp clear-cache")
+		fmt.Fprintln(os.Stderr, "       lazy-mcp version")
 		os.Exit(1)
 	}
 	command := args[sepIdx+1:]
@@ -40,4 +49,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lazy-mcp: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func getVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
 }
