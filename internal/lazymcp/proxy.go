@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-const maxMessageSize = 1 << 20 // 1MB
+const maxMessageSize = 10 << 20 // 10MB
 
 type Proxy struct {
 	command          []string
