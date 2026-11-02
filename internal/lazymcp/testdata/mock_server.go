@@ -34,13 +34,17 @@ func main() {
 
 		switch msg.Method {
 		case "initialize":
+			capabilities := map[string]any{
+				"tools":     map[string]any{},
+				"resources": map[string]any{},
+				"prompts":   map[string]any{},
+			}
+			if os.Getenv("MOCK_TOOLS_ONLY") != "" {
+				capabilities = map[string]any{"tools": map[string]any{}}
+			}
 			respond(msg.ID, map[string]any{
 				"protocolVersion": "2024-11-05",
-				"capabilities": map[string]any{
-					"tools":     map[string]any{},
-					"resources": map[string]any{},
-					"prompts":   map[string]any{},
-				},
+				"capabilities":    capabilities,
 				"serverInfo": map[string]any{
 					"name":    "mock-server",
 					"version": "0.1.0",

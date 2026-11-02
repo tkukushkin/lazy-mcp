@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -1292,5 +1294,56 @@ func TestInProcess_GoLiveOnProbeWithoutParamsCachesIt(t *testing.T) {
 	cached := NewCache([]string{serverBin}).Load()
 	if _, ok := cached["server/discover"]; !ok {
 		t.Fatalf("cache should contain server/discover, got %v", cached)
+	}
+}
+
+func TestInProcess_UnadvertisedListsCachedAfterGoingLive(t *testing.T) {
+	serverBin := buildMockServer(t)
+	cacheDir := t.TempDir()
+	t.Setenv("MOCK_TOOLS_ONLY", "1")
+
+	messages := []string{
+		request(1, "initialize", initParams),
+		notification("notifications/initialized"),
+		request(2, "tools/list"),
+	}
+	if _, err := runProxyInProcess(t, serverBin, cacheDir, messages); err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+
+	resourcesSession := func(idBase int) []string {
+		return []string{
+			request(idBase, "initialize", initParams),
+			notification("notifications/initialized"),
+			request(idBase+1, "tools/list"),
+			request(idBase+2, "resources/list"),
+			request(idBase+3, "resources/templates/list"),
+		}
+	}
+	if _, err := runProxyInProcess(t, serverBin, cacheDir, resourcesSession(10)); err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+
+	cached := NewCache([]string{serverBin}).Load()
+	for _, key := range []string{"resources/list", "resources/templates/list"} {
+		if _, ok := cached[key]; !ok {
+			t.Fatalf("cache should contain %s, got keys %v", key, slices.Sorted(maps.Keys(cached)))
+		}
+	}
+
+	if err := os.Remove(serverBin); err != nil {
+		t.Fatal(err)
+	}
+	responses, err := runProxyInProcess(t, serverBin, cacheDir, resourcesSession(20))
+	if err != nil {
+		t.Fatalf("third run error: %v", err)
+	}
+	if len(responses) != 4 {
+		t.Fatalf("got %d responses, want 4: %v", len(responses), responses)
+	}
+	for i, resp := range responses {
+		if resp["result"] == nil {
+			t.Fatalf("response %d should come from cache, got %v", i, resp)
+		}
 	}
 }

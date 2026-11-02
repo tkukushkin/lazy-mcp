@@ -203,8 +203,10 @@ func (p *Proxy) goLive(triggeringMsg *Message, scanner *bufio.Scanner) error {
 			json.Unmarshal(*initResp.Result, &initResult)
 		}
 
+		// A list request as the trigger fetches every list, advertised or not.
+		_, fetchAllLists := ListMethodToCapability()[triggeringMsg.Method]
 		for method, capKey := range ListMethodToCapability() {
-			if _, ok := initResult.Capabilities[capKey]; ok {
+			if _, ok := initResult.Capabilities[capKey]; ok || fetchAllLists {
 				reqID := fmt.Sprintf("lazy-mcp-%s", method)
 				req := MakeRequest(reqID, method, nil)
 				p.writeServer(SerializeMessage(req))
